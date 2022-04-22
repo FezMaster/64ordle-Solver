@@ -67,6 +67,7 @@ function fetch_cells() {
 
 def setup():
     'Gathers all required information, prepares html file, opens browser'
+    global headless
     global hard
     global poss_words
     global driver
@@ -138,7 +139,9 @@ def guess(firstcall=False):
 
         #Was the last guess correct?
         if (completed.count(-1) == before[0]):
-            print ("Guess was not correct, box was " + str(before[1]))
+            if 0 < before[2] < 5: print ("Guess set at position " + str(before[2]) + " was not correct, box was " + str(before[1]))
+            else: print ("Guess set at position " + str(before[2]) + " was not correct")
+            #Note: before[2] is intended to serve as a marker to indicate which process decided that that word would be the one to be entered
             if len(correct_answers) > 0: correct_answers.pop(-1)
         before[0] = completed.count(-1)
 
@@ -150,7 +153,7 @@ def guess(firstcall=False):
             blacks = {} #Letters not in the word (or letter was guessed twice in the same line and the letter's only in that line once)
             yellows = {} #Letters that are in the word but in the wrong place, records list of wrong places with each letter as key
             greens = {0:{}, 1:{}, 2:{}, 3:{}, 4:{}} #Correctly placed letters, sorted by column
-
+            
             for ind2, column in enumerate(box): #Collect all the cells in this box and their current status, update color dicts accordingly
                 for cell in column:
                     assert cell[2] in ['green', 'yellow', 'black'], "Invalid color '" + str(cell[2]) + "'"
@@ -171,6 +174,7 @@ def guess(firstcall=False):
                     for k in v.keys():
                         guesses['sure'] = guesses['sure'] + k[0]
                 before[1] = ind #Update the before list so it describes our new guess
+                before[2] = 1
                 break #If we're dead certain of a guess, no more need to comb through the rest of the board
 
             elif len(yellows) > 0 or len([v for v in greens.values() if len(v) > 0]) > 0: #Checks the box isn't entirely black
@@ -194,19 +198,32 @@ def guess(firstcall=False):
                         for c in yellows[k].keys(): #For each column the letter is yellow in, add to the list
                             letters['yellow'][k].append(c)
 
+                # if completed.count(-1) == 3:
+                #     print (letters)
+                #     print (greens)
+                #     print (yellows)
+
                 poss_guess = []
                 poss_letters = []
-                for l in letters['green'].keys():
+                for l in [[key for key in k.keys()][0] for k in greens.values() if len(k) > 0]:
                     for c in greens.items():
                         if l in c[1].keys():
                             poss_guess.append((c[0], l))
                             poss_letters.append(l)
                             break
-                for d in letters['yellow'].keys():
-                    for l in d:
+                for l in letters['yellow'].keys():
+                    if l in letters['green'].keys():
+                        green_lines = letters['green'][l]
+                        yellow_lines = []
+                        for c in letters['yellow'][l]: yellow_lines = yellow_lines + yellows[l][c]
+                    if not (l in letters['green'].keys() and len([rl for rl in yellow_lines if rl in green_lines])):
                         poss_letters.append(l)
                         poss_guess.append((-1, l))
                 
+                # if completed.count(-1) == 3:
+                #     print (poss_guess)
+                #     print (poss_letters)
+
                 poss_matches = []
                 for word in poss_words:
                     ls = []
@@ -215,6 +232,7 @@ def guess(firstcall=False):
                         elif l[0] == -1:
                             if len(poss_letters) == 5 and word.count(l[1]) == poss_letters.count(l[1]) != 0: ls.append(l)
                             elif len(poss_letters) == 4 and word.count(l[1]) > 0: ls.append(l)
+                    if completed.count(-1) == 64 and ind == 38 and len(ls) > 1: print (ls)
                     if len(ls) == len(poss_guess):
                         if word not in prev_guesses:
                             is_ok = True #This bit is basically an idiot check
@@ -228,12 +246,13 @@ def guess(firstcall=False):
                 if len(poss_matches) == 1:
                     guesses['sure'] = poss_matches[0]
                     before[1] = ind
+                    before[2] = 2
                     break
                 elif len(poss_matches) > 1:
                     if len(letters['yellow']) + len(letters['green']) in [4, 5]: #If we know 4 or 5 of the letters, try to unscramble it
                         guesses['unscramble'].append([poss_matches.copy(), blacks.copy(), letters.copy(), ind])
                     else: guesses['more_info_needed'].append([poss_matches.copy(), ind])
-        
+
         del cell_states #Normally I don't care about deleting variables but this object's size on disk is absolutely humongous so
 
         if len(guesses['sure']) == 0 and len(guesses['unscramble']) > 0: #Try to unscramble the word
@@ -251,6 +270,7 @@ def guess(firstcall=False):
                 if len(box[0]) == 1 or (ind == len(guesses['unscramble']) - 1 and len(guesses['more_info_needed']) == 0):
                     guesses['sure'] = box[0][0]
                     before[1] = box[3]
+                    before[2] = 3
                     break
         
         #If we've reached this point with no value for guesses['sure'], it's because we don't have enough information to make a confident guess
@@ -261,76 +281,53 @@ def guess(firstcall=False):
             for i in guesses.values():
                 if isinstance(i, str): continue #Skip over guesses['sure']
 
-                ensure_ls = [] #Optimize for words with these letters in them (position does not matter)
-                ensure_ls_w_pos = {} #Intermediary dict that is necessary for creation of ensure_ls_pos but is not referenced afterwards
-                ensure_ls_pos = ['', '', '', '', ''] #Optimize for words with these letters in them (position does matter)
-                poss_matches = [[], [], [], [], []]
-                if len(i) > 0:
-                    for box in i:
-                        if len(box[0]) > 100: continue #Ignore if there are too many possible answers
-                        ls_pos = {}
-                        for word in box[0]:
-                            for l in word:
-                                if l not in ls_pos.keys(): ls_pos[l] = []
-                                ls_pos[l].append(word.index(l))
+                ensure_ls = [] #Letters we want to try guessing, but doesn't matter what spot in the word they're in
+                ensure_ls_pos = [[], [], [], [], []] #ensure_ls but this time it does matter what spot the letter is in
 
-                                is_unique = True
-                                for o_word in box[0]:
-                                    if o_word == word: continue
-                                    elif l in o_word: is_unique = False
-                                if is_unique: ensure_ls.append(l)
-                        for l in ls_pos.items():
-                            if len(l[1]) > 1:
-                                if l[0] not in ensure_ls_w_pos.keys(): ensure_ls_w_pos[l[0]] = []
-                                for pos in l[1]: ensure_ls_w_pos[l[0]].append(pos)
+                for box in i:
+                    if len(box[0]) > 100: continue #Skips over boxes where the number of possible words is too long
 
-                #check to see if there are multiple letters jockeying for the same position in word
-                doubles = {}
-                for pos_ls in ensure_ls_w_pos.items():
-                    for pos in pos_ls[1]:
-                        for o_pos_ls in ensure_ls_w_pos.values():
-                            if pos_ls == o_pos_ls: continue
-                            for o_pos in o_pos_ls:
-                                if o_pos == pos:  
-                                    if pos not in doubles.keys(): doubles[pos] = {}
-                                    if pos_ls[0] not in doubles[pos].keys(): doubles[pos][pos_ls[0]] = 0
-                                    doubles[pos][pos_ls[0]] += 1
+                    ls_pos = [[], [], [], [], []]
+                    for word in box[0]:
+                        for ind, l in enumerate(word):
+                            ls_pos[ind].append(l)
+                    for ind, pos in enumerate(ls_pos):
+                        if pos.count(pos[0]) == len(pos): continue #Skips if all the same letter in this position, means we've got a green
+                        for ind2, o_pos in enumerate(ls_pos[ind:]):
+                            if ind == (ind2 + ind) or o_pos.count(o_pos[0]) == len(o_pos): continue
+                            for l in pos:
+                                if l in o_pos: ensure_ls_pos[ind].append(l) #The letter could appear in multiple positions, we want to narrow it down
+                                elif l not in ensure_ls: ensure_ls.append(l) #The letter may be in the word but only in one spot
 
-                #If a spot has multiple contenders, which letter has been most requested for placement in that spot?
-                if len(doubles) > 0:
-                    for pos in doubles.items():
-                        most_common_letters = []
-                        for l in pos[1].items():
-                            ins_index = 0
-                            for ind, mcl in enumerate(most_common_letters):
-                                if mcl[1] < l[1]:
-                                    if ind == len(most_common_letters): ins_index = -1
-                                    else: ins_index = ind + 1
-                            most_common_letters.insert(ins_index, (l[0], l[1]))
-                        ensure_ls_pos[pos[0]] = most_common_letters[-1][0]
-
-                #If either ensure_ls or ensure_ls_pos have entries, find words that might match the letters and then rank by how closely they match
-                if len([i for i in ensure_ls_pos if len(i) > 0]) > 0 or len(ensure_ls) > 0:
-                    with_ensure_ls_check = []
-                    for word in poss_words:
-                        off_by = 0
-                        for l in word:
-                            if len([i for i in ensure_ls_pos if len(i) > 0]) > 0:
-                                if l in ensure_ls_pos:
-                                    if [v for v in ensure_ls_pos].index(l) != word.index(l): off_by += 1
-                                else: off_by += 1
-                            else:
-                                if len(ensure_ls) > 0 and l not in ensure_ls: off_by += 1
-                        if off_by < 5: poss_matches[off_by].append(word)
-                        if off_by == 0 and len(ensure_ls) > 0 and l not in ensure_ls: with_ensure_ls_check.append(word)
-
-                    if len(with_ensure_ls_check) > 0: poss_matches[0] = with_ensure_ls_check.copy()
+                for pos in ensure_ls_pos:
+                    if len(pos) > 1:
+                        most_req_ls = []
+                        for l in ensure_ls_pos:
+                            l_index = 0
+                            for mrl in most_req_ls:
+                                if pos.count(mrl) > pos.count(l): break
+                                l_index += 1
+                            most_req_ls.insert(l_index, l)
+                        pos = [most_req_ls[-1]]
                 
-                #Guess the closest match, if multiple matches of equal closeness, just guess the first one in the list
-                for ind, item in enumerate(poss_matches):
-                    if ind < 3 and 0 < len(item) < 6:
-                        guesses['sure'] = poss_matches[ind][0]
-                        before[1] = box[-1]
+                poss_guesses = [[], [], [], [], []]
+                if len(ensure_ls) > 0: with_ensure_ls = []
+                for word in poss_words:
+                    off_by = 0
+                    score = 0
+                    for ind, l in enumerate(word):
+                        if len(ensure_ls_pos[ind]) > 0 and l != ensure_ls_pos[ind]: off_by += 1
+                        if len(ensure_ls) > 0 and l in ensure_ls and l not in word[:ind]: score += 1
+                    if off_by < 5: poss_guesses[off_by].append(word)
+                    if score == 5 - len([pos for pos in ensure_ls_pos if len(pos) > 0]): with_ensure_ls.append(word)
+                
+                if len(ensure_ls) > 0 and len(with_ensure_ls) > 0: poss_guesses = [with_ensure_ls.copy()]
+
+                for ind, pos in enumerate(poss_guesses):
+                    if ind < 3 and 0 < len(pos) < 6:
+                        guesses['sure'] = pos[0]
+                        before[1] = 0
+                        before[2] = 4
                         break
                 
                 if len(guesses['sure']) > 0: break
@@ -355,17 +352,21 @@ def guess(firstcall=False):
                             print ('Maximized for difference, word found with ' + str(5 - most_diff_words.index(i)) + ' unused letters')
                             guesses['sure'] = word
                             before[1] = 0
+                            before[2] = 5
                             break
                     if len(guesses['sure']) > 0: break
                 
                 if len(guesses['sure']) == 0:
-                    guesses['sure'] = 'wreck' #At this point I said screw it. This code will pretty much never run, only here as a failsafe
-                    before[1] == 0
+                    if 'wreck' in prev_guesses: before[2] = 7
+                    else:
+                        guesses['sure'] = 'wreck' #Usually if this code runs, it means something's gone wrong
+                        before[1] = 0
+                        before[2] = 6
 
         return guesses['sure']
 
     else:
-        before = [64, 0]
+        before = [64, 0, 0]
         enter_guess('penis') #Haha cock
 
 def enter_guess(guess):
@@ -392,17 +393,28 @@ def play():
     print ("Solving " + driver.find_element(value='game_title').text + "\n\nEntering guess: bayou")
     
     t_begin = perf_counter()
-    before = [64, 0] #First value is number of unsolved words, second value is which word we were trying to solve with the most recent guess
+
+    #First value in before is number of unsolved words
+    #Second value in before is which word we were trying to solve with the most recent guess
+    #Third value in before is a way to identify which process assigned the guess value
+    before = [64, 0, 0]
     enter_guess('bayou')
     correct_answers = ['bayou'] #All guesses made are automatically added to this list, but if it's discovered they're not correct, they're removed
 
     while completed_mode not in str(driver.execute_script("return localStorage.getItem('completed')")):
         result = guess() #Should return a five character string
-        if isinstance(result, str) and len(result) == 5:
-            print ("Entering guess: " + result)
-            correct_answers.append(result)
-            enter_guess(result)
-        else: raise ValueError('Error: Invalid result value: ' + str(result) + ', this is an issue with the code.')
+        if before[2] == 7:
+            print ('Error: No possible guess could be found')
+            if headless:
+                result = input("Enter your own guess: ")
+                while result not in poss_words:
+                    result = input("Enter your own guess, must be valid 5 letter word: ")            
+        if not isinstance(result, str) and len(result) == 5:
+            raise ValueError("Invalid result value: '" + str(result) + "', this is an issue with the code.")
+        
+        print ("Entering guess: " + result)
+        correct_answers.append(result)
+        enter_guess(result)
 
         if InterruptAfter >= 0:
             if 64 - driver.execute_script("return localStorage.getItem('answer_correct')").count('-1') >= InterruptAfter: return
