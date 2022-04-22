@@ -330,7 +330,7 @@ def guess(firstcall=False):
                 for ind, item in enumerate(poss_matches):
                     if ind < 3 and 0 < len(item) < 6:
                         guesses['sure'] = poss_matches[ind][0]
-                        before[1] = box[1]
+                        before[1] = box[-1]
                         break
                 
                 if len(guesses['sure']) > 0: break
