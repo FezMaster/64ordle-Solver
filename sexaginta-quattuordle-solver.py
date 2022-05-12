@@ -1,4 +1,3 @@
-import this
 import urllib.request as urlr
 import urllib.error as urle
 import ssl
