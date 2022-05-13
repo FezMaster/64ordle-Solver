@@ -207,7 +207,6 @@ def guess(firstcall=False):
 
             if len([i for i, e in enumerate(y_word) if l[0] in e and len(g_word[i]) == 0]) == len([i for i in g_word if len(i) == 0]) - 1:
                 #That mess is basically trying to tell if there's only one possible location that the yellow letter could be in
-            # if len([i for i in yb_word if l[0] in i]) == 5 - len([i for i in g_word if len(i) > 0]) - 1: #If there's only one possible location
                 is_certain = True
                 if l[0] in [g[0] for g in greens if g is not None]: #If the letter appears in the greens list
                     is_certain = False #It's possible the yellow instance was just a green instance but in the wrong spot
